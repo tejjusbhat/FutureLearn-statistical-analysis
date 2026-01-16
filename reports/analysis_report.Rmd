@@ -1,5 +1,5 @@
 ---
-title: "FutureLearn MOOC Learning Analytics: Engagement and Completion (Runs 6–7)"
+title: "FutureLearn MOOC Learning Analytics: Engagement and Completion (Runs 6-7)"
 author: "Tejjus Suraj Bhat"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -57,7 +57,7 @@ This investigation is based on the CRISP-DM (Cross-Industry Standard Process for
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.4\textwidth]{crispdm.png}
-\caption{Figure 2.1: CRISP-DM Cycle}
+\caption{CRISP-DM Cycle}
 \end{figure}
 
 1. **Business Understanding**
@@ -95,35 +95,234 @@ Engagement features were derived by aggregating step-level activity data to the 
 
 # CRISP-DM Cycle 1
 ## Business Understanding
-Describe the business understanding here.
+In the first CRISP-DM cycle, the objective is to develop a basic understanding of the learner engagement behaviour and how it relates to retention and course completion within the MOOC. The stakeholder assumed in the investigation is that of the course provider and the learning analytics team, the party who would benefit from the insights gained from the description of engagement behaviour and its relationship to course outcomes. The primary goal of the first cycle is therefore descriptive, to establish a baseline for the engagement patterns, quantify non-engagement and assess whether there is any correlation between engagement behaviours from step activity to learners who complete the course.
+
+The specific research question addressed in the first cycle is therefore:
+
+**_”How does overall learner engagement relate to course completion and disengagement in the MOOC?”_**
+
+Success criteria for Cycle 1 is as follows:
+
+- Engagement measures are constructed in a transparent and reproducible way from step-level activity data.
+
+- The analysis of learners and the patterns in their engagement with respect to their background.
+
+- The distribution of learners who have zero recorded activity.
+
+- Providing basis and results to define a refined question for Cycle 2.
 
 ## Data Understanding
-Describe the data understanding here.
+The first CRISP-DM cycle starts with the examination of the structure, scale and quality of the data used in the analysis. Two datasets are considered for this, the enrolments dataset and the step activity dataset, linked through learner and run identifiers. For Cycle 1, engagement will be defined over the full duration of the course using the step-level activity for the runs.
+
+```{r fig-completion-imbalance, fig.cap="Completion imbalance (runs 6-7)", fig.width=6, fig.height=4}
+enrolments_clean |>
+  dplyr::mutate(completed = ifelse(completed, "Completed", "Not completed")) |>
+  dplyr::count(completed) |>
+  ggplot(aes(x = completed, y = n)) +
+  geom_col() +
+  labs(
+    x = NULL,
+    y = "Number of learners"
+  ) +
+  theme_minimal()
+```
+
+The enrolments data provides a view of the population from the learner-level such as enrolment timestamps, learner demographic and platform-defined indicator of course completion. The first look of the data as shown in Figure 2,  shows that the number of enrolled learners is large relative to the number of completers meaning there is a large imbalance in the outcome variable. Only a small fraction of learners actually completed the course which is consistent with MOOC participants.
+
+The step activity data records learners' interaction with the course content at the step level of the course. THis dataset is larger than the enrolments data as it contains multiple entries of learners interacting with the course content. Exploratory analysis reveals that engagement measures show that the data is highly skewed, with the majority of the learners only interacting with a few modules of the course.
+
+```{r fig-zero-activity, fig.cap="Zero-activity vs any-activity learners (runs 6-7)", fig.width=6, fig.height=4}
+cycle1_analysis_table |>
+  dplyr::mutate(activity = ifelse(any_step_activity, "Any activity", "Zero activity")) |>
+  dplyr::count(activity) |>
+  ggplot(aes(x = activity, y = n)) +
+  geom_col() +
+  labs(
+    x = NULL,
+    y = "Number of learners"
+  ) +
+  theme_minimal()
+```
+
+A data quality issue that was identified was the presence of learners shown in figure 3, with no recorded step activity despite being enrolled in the course, meaning they enrolled but never engaged with any of the content. These zero-activity learners represent a non-negligible portion of the population. These records were treated as valid observations and not missing values as they provide key insight into the behaviour of learners engaging with the course content or the lack thereof. Retaining these learners is important for accurately measuring the retention and engagement patterns.
+
+Additional data quality issue was the presence of missing or unsupported timestamp values in some activity records. This was handled using a preprocessing function to convert the malformed timestamp into R readable timestamp. There was presence repeated learners across runs 6 and 7, meaning people retook the course or the same identifier was used to define learners across different runs, in either case when joining the two datasets a run identifier was introduced to act as a join primary key for the resultant dataset
+
+```{r fig-employment-vs-completion, fig.cap="Completion rate by employment status", fig.width=7, fig.height=4}
+enrolments_clean |>
+  dplyr::mutate(employment_status = dplyr::if_else(
+    is.na(employment_status) | employment_status == "",
+    "Unknown",
+    employment_status
+  )) |>
+  dplyr::group_by(employment_status) |>
+  dplyr::summarise(
+    n = dplyr::n(),
+    completion_rate = mean(completed, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  dplyr::filter(n >= 30) |>
+  ggplot(aes(x = reorder(employment_status, completion_rate), y = completion_rate)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.1)) +
+  labs(
+    x = NULL,
+    y = "Completion rate"
+  ) +
+  theme_minimal()
+```
+
+The distribution of learners by employment status was also examined to better understand the demographic composition of the course population. Figure 4 shows the relationship between employment status and the engagement of the groups. While the majority of the learners fall into working categories the engagement overall remains low.
+
+Overall, the data used in Cycle 1 is characterised by large scale, sparsity and extreme class imbalance. These properties result in the analytical choices made in subsequent phases, favouring descriptive analysis over predictive modelling at this stage.
 
 ## Data Preparation
-Describe the data preparation here.
+For cycle 1, the step-level data was aggregated to the learner-run level to create the overall engagement features such as steps visited and completed as well as indicators capturing whether a learner engaged with any course content. Learners with no recorder step activity were kept as zero engagement learners for non-participants to reflect in the data. All preparation steps were implemented in the munge folder programmatically for convenience and consistency in analysis.
 
 ## Analysis
-Describe the modeling here.
+
+```{r fig-c1-completion-by-band, fig.cap="Completion rate by overall engagement band (runs 6-7)", fig.width=7, fig.height=4}
+cycle1_analysis_table |>
+  dplyr::mutate(
+    steps_band = dplyr::case_when(
+      steps_visited == 0 ~ "0",
+      steps_visited %in% 1:2 ~ "1-2",
+      steps_visited %in% 3:5 ~ "3-5",
+      steps_visited %in% 6:10 ~ "6-10",
+      steps_visited > 10 ~ "11+"
+    )
+  ) |>
+  dplyr::group_by(steps_band) |>
+  dplyr::summarise(
+    n = dplyr::n(),
+    completion_rate = mean(completed, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  ggplot(aes(x = steps_band, y = completion_rate)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.1)) +
+  labs(
+    x = "Steps visited band",
+    y = "Completion rate"
+  ) +
+  theme_minimal()
+```
+
+Figure 5 shows that learners who completed the course generally visited more steps than non-completers. While distributions overlap, higher engagement level can be directly associated with the likelihood of completion. Further analysis shows that completion rate increases with higher engagement even though overall engagement is low. This suggests that there is some relation between early engagement and completion.
 
 ## Evaluation
-Describe the evaluation here.
+Cycle 1 provides a basic understanding of engagement and completion in runs 6 and 7 of the Futurelearn MOOC. The data shows extreme class imbalance with completion being rare and engagement measures having skewness with a substantial proportion of learners recording zero activity. Even with the limitations the aggregated engagement indicators from step activity show the difference of completers and non-completers, with learners completing the course showing high levels of engagement.
+
+The Cycle 1 success criteria was met in that engagement measures were constructed in a transparent and reproducible way from step-level activity data. The analysis of learners and the patterns in their engagement with respect to their background and a refined question is now formed for cycle 2 which helps provide a more actionable signal for identifying learners at risk of disengagement.
+
 
 # CRISP-DM Cycle 2
 ## Business Understanding
-Describe the business understanding here.
+Cycle 1 established that overall engagement is associated with completion but those measures are retrospective to a large extent and therefore provide limited capability to predict user retention. Cycle 2 refines the investigation to focus on whether early engagement provides a more actionable signal related to completion outcomes. The stakeholder motivation at this stage is to find patterns that could support early intervention for learner retention.
+
+The specific research question addressed in this cycle is:
+
+**_”Does early engagement in the first weeks of the course differentiate learners who complete the MOOC from those who do not?”_**
+
+Success criteria for Cycle 2 is as follows:
+
+- Early-engagement features are defined from step activity data.
+
+- The relationship between early engagement and completion is visualised.
+
+- A model is fitted to assess the association between early engagement features and completion.
 
 ## Data Understanding
-Describe the data understanding here.
+Cycle 2 shifts focus onto early engagement by building on Cycle 1 and its focus on overall engagement. At this stage, the key data understanding objective is to construct early engagement features consistently for comparability to results from Cycle 1. Early engagement is defined using step activity within the initial weeks of the course which is aggregated at the learner level.
+
+Exploration of this derived dataset shows that a substantial percentage of learners show some kind of early activity, while non-negligible percentage of people show no early engagement. The cross tabulation of completion by early activity shows that early activity is a potential differentiator but since the data is highly imbalanced it cannot be said for certain so it is treated as a potential rather than a cause-effect.
+
+```{r qc-cycle2, echo=FALSE}
+qc_cycle2_feature_summary
+dplyr::count(analysis_table, any_early_activity)
+dplyr::count(analysis_table, completed, any_early_activity)
+```
+
+```{r fig-c2-completion-early, fig.cap="Completion rate by early activity (runs 6–7)", fig.width=6, fig.height=4}
+analysis_table |>
+  dplyr::group_by(any_early_activity) |>
+  dplyr::summarise(
+    n = dplyr::n(),
+    completion_rate = mean(completed, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  dplyr::mutate(any_early_activity = ifelse(any_early_activity, "Any early activity", "No early activity")) |>
+  ggplot(aes(x = any_early_activity, y = completion_rate)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.1)) +
+  labs(
+    x = NULL,
+    y = "Completion rate"
+  ) +
+  theme_minimal()
+```
+
+Figure 6 summarises completion rates for learners with and without early engagement. The completion rate is low overall but it is higher among learners who record early activity. This supports the hypothesis of early engagement being a potentially actionable signal.
 
 ## Data Preparation
-Describe the data preparation here.
+For this cycle data preparation process refines the originally constructed features in the first cycle restricting attention to initial weeks of the course. The step activity was limited to the initial weeks of the course and aggregated at a learner level. From this aggregation, a binary indicator of early engagement was created to capture if there was early engagement.
+
+Learners with no early activity were retained as zero early engagement. This preserves the full population and shows the non-participation behaviour of the learners. All transformations were implemented programmatically through the munge process to maintain the reproducibility.
 
 ## Analysis and Modelling
-Describe the modeling here.
+This cycle analyses the findings by fitting an exploratory model to assess the association between early engagement and course completion. Given the binary outcome variable, it was decided to fit a logit function to the model and create a logistic regression model. The purpose of this model is to evaluate statistical significance of early engagement rather than to produce a predictive model.
+
+Due to the imbalance in the outcome variable the model results should be interpreted with caution. The estimated probabilities should reflect on the limitations rather than to make strong predictions. Model diagnostics are included to assess whether the fitted model is consistent with the observed data.
+
+```{r c2-logistic-model, echo=FALSE}
+glm_c2 <- glm(
+  completed ~ any_early_activity,
+  data = analysis_table,
+  family = binomial(link = "logit")
+)
+
+summary(glm_c2)
+```
+
+```{r fig-c2-binned-residuals, fig.cap="Binned residuals for early engagement logistic regression", fig.width=6, fig.height=4}
+analysis_table |>
+  dplyr::mutate(
+    predicted = predict(glm_c2, type = "response"),
+    residual = completed - predicted,
+    bin = dplyr::ntile(predicted, 10)
+  ) |>
+  dplyr::group_by(bin) |>
+  dplyr::summarise(
+    mean_pred = mean(predicted),
+    mean_resid = mean(residual),
+    .groups = "drop"
+  ) |>
+  ggplot(aes(x = mean_pred, y = mean_resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Mean predicted probability",
+    y = "Mean residual (observed - predicted)"
+  ) +
+  theme_minimal()
+```
+
+Figure 7 shows a binned residual diagnostic for the logistic regression model fitted in Cycle 2. Residuals are centred around zero across bins of predicted probability, indicating no strong systematic miscalibration. However since the residuals are so highly variable the results must be interpreted with a grain of salt as it shows the rarity of the event.
 
 ## Evaluation
-Describe the evaluation here.
+Cycle 2 demonstrates that early engagement has statistically significant association with course completion with almost all completers exhibiting some form of early activity. The logit GLM analysis reinforces this pattern for learners with early engagement. These results suggest that early engagement may serve as a useful indicator for identifying at-risk learners but should be interpreted cautiously with additional behavioural or contextual information.
 
 # Conclusion
+This report applied a CRSIP-DM approach to investigate learner engagement and completion in a FutureLearn MOOC across two cycles . The first established a baseline showing engagement patterns and their association with completion. The second cycle built on this idea by understanding whether early engagement can be a determining factor to predict deserters early.
 
+The analysis brings to light that the completion rate of the MOOC is low overall with severe class imbalance but early engagement holds statistical significance to show whether a learner will complete the MOOC or not. Future work could incorporate behavioural features, additional contextual data such as results of tests or surveys to better understand learner retention and provide more targeted support mechanisms.
+
+# References
+[1] Z. Abedjan, Ł. Golab, and F. Naumann, “Profiling relational data: A survey,” *The VLDB Journal*, vol. 24, no. 4, pp. 557–581, 2015, doi: 10.1007/s00778-015-0389-y.
+
+[2] A. Khan and J. Bentham, “Chapter 11: Generalised linear models,” in *Graduate Foundations of Statistics and Data Science*, 2025.
+
+[3] P. Chapman, J. Clinton, R. Kerber, T. Khabaza, T. Reinartz, C. Shearer, and R. Wirth, *CRISP-DM 1.0: Step-by-step data mining guide*. SPSS Inc., 2000.
+
+[4] M. P. J. van der Loo and E. de Jonge, “Data validation infrastructure for R,” *Journal of Statistical Software*, vol. 97, no. 10, 2021, doi: 10.18637/jss.v097.i10.
